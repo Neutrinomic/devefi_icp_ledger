@@ -16,51 +16,26 @@ import SWB "mo:swb";
 import Array "mo:base/Array";
 import Iter "mo:base/Iter";
 import BTree "mo:stableheapbtreemap/BTree";
+import Ver1 "./memory/v1";
+import MU "mo:mosup";
 
 module {
     type R<A,B> = Result.Result<A,B>;
+
+    public module Mem {
+        public module Ledger {
+            public let V1 = Ver1.Ledger;
+        };
+    };
+
+    let VM = Mem.Ledger.V1;
 
     /// No other errors are currently possible
     public type SendError = {
         #InsufficientFunds;
     };
 
-    /// Local account memory
-    public type AccountMem = {
-        var balance: Nat;
-        var in_transit: Nat;
-    };
-
-    public type Mem = {
-        reader: IcpReader.Mem;
-        sender: IcpSender.Mem;
-        accounts: Map.Map<Blob, AccountMem>;
-        var actor_principal : ?Principal;
-        known_accounts : BTree.BTree<Blob, Blob>; // account id to subaccount
-        var fee : Nat;
-        var next_tx_id : Nat64;
-    };
-
-    public type Meta = {
-        symbol: Text;
-        decimals: Nat8;
-        fee: Nat;
-        minter: ICPLedger.Account;
-    };
-
-    /// Used to create new ledger memory (it's outside of the class to be able to place it in stable memory)
-    public func LMem() : Mem {
-        {
-            reader = IcpReader.Mem();
-            sender = IcpSender.Mem();
-            accounts = Map.new<Blob, AccountMem>();
-            var actor_principal = null;
-            known_accounts = BTree.init<Blob, Blob>(?16);
-            var fee = 10000;
-            var next_tx_id = 0;
-        }
-    };
-
+ 
     public func subaccountToBlob(s: ?Blob) : Blob {
         let ?a = s else return Blob.fromArray([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]);
         a;
@@ -107,8 +82,8 @@ module {
     ///     stable let lmem = L.LMem();
     ///     let ledger = L.Ledger(lmem, "bnz7o-iuaaa-aaaaa-qaaaa-cai", #last);
     /// ```
-    public class Ledger<system>(lmem: Mem, ledger_id_txt: Text, start_from_block : ({#id:Nat; #last})) {
-
+    public class Ledger<system>(xmem: MU.MemShell<VM.Mem>, ledger_id_txt: Text, start_from_block : ({#id:Nat; #last}), me_can : Principal ) {
+        let lmem = MU.access(xmem);
         let ledger_id = Principal.fromText(ledger_id_txt);
         let minter = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
 
@@ -121,7 +96,6 @@ module {
         var callback_onSent : ?((Nat64) -> ()) = null;
         // Sender 
 
-        var started : Bool = false;
 
         private func logErr(e:Text) : () {
             let idx = errors.add(e);
@@ -140,9 +114,9 @@ module {
             not Option.isNull(BTree.get(lmem.known_accounts, Blob.compare, aid));
         };
 
-        let icrc_sender = IcpSender.Sender({
+        let icrc_sender = IcpSender.Sender<system>({
             ledger_id;
-            mem = lmem.sender;
+            xmem = lmem.sender;
             getFee = func () : Nat { lmem.fee };
             onError = logErr; // In case a cycle throws an error
             onConfirmations = func (confirmations: [Nat64]) {
@@ -153,10 +127,11 @@ module {
             };
             onCycleEnd = func (i: Nat64) { sender_instructions_cost := i }; // used to measure how much instructions it takes to send transactions in one cycle
             isRegisteredAccount;
+            me_can;
         });
         
         private func handle_incoming_amount(subaccount: ?Blob, amount: Nat) : () {
-            switch(Map.get<Blob, AccountMem>(lmem.accounts, Map.bhash, subaccountToBlob(subaccount))) {
+            switch(Map.get<Blob, VM.AccountMem>(lmem.accounts, Map.bhash, subaccountToBlob(subaccount))) {
                 case (?acc) {
                     acc.balance += amount:Nat;
                 };
@@ -184,7 +159,7 @@ module {
             };
 
             if (acc.balance == 0 and acc.in_transit == 0) {
-                ignore Map.remove<Blob, AccountMem>(lmem.accounts, Map.bhash, subaccountToBlob(subaccount));
+                ignore Map.remove<Blob, VM.AccountMem>(lmem.accounts, Map.bhash, subaccountToBlob(subaccount));
             };
 
         };
@@ -197,8 +172,8 @@ module {
 
 
         // Reader
-        let icrc_reader = IcpReader.Reader({
-            mem = lmem.reader;
+        let icp_reader = IcpReader.Reader<system>({
+            xmem = lmem.reader;
             ledger_id;
             start_from_block;
             onError = logErr; // In case a cycle throws an error
@@ -207,8 +182,7 @@ module {
             onRead = func (transactions: [TxTypes.Transaction], _) {
                 icrc_sender.confirm(transactions);
                 
-                let fee = lmem.fee;
-                let ?me = lmem.actor_principal else return;
+                
                 label txloop for (tx in transactions.vals()) {
                     switch(tx) {
                         case (#u_mint(mint)) {
@@ -220,7 +194,7 @@ module {
                                     subaccount = null;
                                 });
                                 to = {
-                                    owner = me;
+                                    owner = me_can;
                                     subaccount = formatSubaccount(subaccount);
                                 };
                                 amount = mint.amount;
@@ -232,20 +206,22 @@ module {
                         };
 
                         case (#u_transfer(tr)) {
+                            let fee = tr.fee;
                             switch(BTree.get(lmem.known_accounts, Blob.compare, tr.to)) {
                                 case (?subaccount) {
+
                                     if (tr.amount >= fee) { // ignore it since we can't even burn that
                                     handle_incoming_amount(?subaccount, tr.amount);
-                                    let from_subaccount = BTree.get(lmem.known_accounts, Blob.compare, tr.from) else continue txloop;
 
+                                    let from_subaccount = BTree.get(lmem.known_accounts, Blob.compare, tr.from);
                                     ignore do ? { callback_onReceive!({
                                         from = switch(from_subaccount) {
-                                            case (?sa) #icrc({owner = me; subaccount = formatSubaccount(sa)});
+                                            case (?sa) #icrc({owner = me_can; subaccount = formatSubaccount(sa)});
                                             case (null) #icp(tr.from);
                                         };
                                         amount = tr.amount;
                                         to = {
-                                            owner = me;
+                                            owner = me_can;
                                             subaccount = formatSubaccount(subaccount);
                                         };
                                         created_at_time = ?tr.created_at_time;
@@ -261,7 +237,7 @@ module {
                       
                             switch(BTree.get(lmem.known_accounts, Blob.compare, tr.from)) {
                                 case (?subaccount) {
-                                    handle_outgoing_amount(?subaccount, tr.amount + fee);
+                                    handle_outgoing_amount(formatSubaccount(subaccount), tr.amount + fee);
                                 };
                                 case (null) ();
                             };
@@ -269,7 +245,7 @@ module {
 
                         case (#u_burn(burn)) {
                             let ?subaccount = BTree.get(lmem.known_accounts, Blob.compare, burn.from) else continue txloop;
-                            handle_outgoing_amount(?subaccount, burn.amount + fee);
+                            handle_outgoing_amount(formatSubaccount(subaccount), burn.amount);
                         };
 
                         case (_) continue txloop;
@@ -279,7 +255,7 @@ module {
             };
         });
 
-        icrc_sender.setGetReaderLastTxTime(icrc_reader.getReaderLastTxTime);
+        icrc_sender.setGetReaderLastTxTime(icp_reader.getReaderLastTxTime);
 
         private func refreshFee() : async () {
             try {
@@ -303,53 +279,18 @@ module {
         /// This why we need to register them, so it can track balances and transactions
         /// Any transactions to or from a subaccount before registering it will be ignored
         public func registerSubaccount(subaccount: ?Blob) : () {
-            let ?me = lmem.actor_principal else Debug.trap("no actor principal");
-            ignore BTree.insert<Blob, Blob>(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me, subaccount), subaccountToBlob(subaccount));
+            ignore BTree.insert<Blob, Blob>(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me_can, subaccount), subaccountToBlob(subaccount));
         };
 
         public func unregisterSubaccount(subaccount: ?Blob) : () {
-            let ?me = lmem.actor_principal else Debug.trap("no actor principal");
-            ignore BTree.delete<Blob, Blob>(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me, subaccount));
+            ignore BTree.delete<Blob, Blob>(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me_can, subaccount));
         };
 
-
-        /// Set the actor principal. If `start` has been called before, it will really start the ledger.
-        public func setOwner(me: Principal) : () {
-            lmem.actor_principal := ?me;
-        };
-        
-
-        // will loop until the actor_principal is set
-        private func delayed_start<system>() : async () {
-          if (not Option.isNull(lmem.actor_principal)) {
-            await refreshFee();
-            realStart<system>();
-            ignore Timer.recurringTimer<system>(#seconds 3600, refreshFee); // every hour
-          } else {
-            ignore Timer.setTimer<system>(#seconds 3, delayed_start);
-          }
-        };
-
-
-
- 
-        /// Really starts the ledger and the whole system
-        private func realStart<system>() {
-            let ?me = lmem.actor_principal else Debug.trap("no actor principal");
-            Debug.print(debug_show(me));
-            registerSubaccount(null);
-            if (started) Debug.trap("already started");
-            started := true;
-            icrc_sender.start<system>(?me); // We can't call start from the constructor because this is not defined yet
-            icrc_reader.start<system>();
-            
-        };
-
+  
 
         /// Returns the actor principal
         public func me() : Principal {
-            let ?me = lmem.actor_principal else Debug.trap("no actor principal");
-            me;
+            me_can;
         };
 
         /// Returns the errors that happened
@@ -364,28 +305,28 @@ module {
         /// Returns info about ledger library
         public func getInfo() : Info {
             {
-                last_indexed_tx = lmem.reader.last_indexed_tx;
+                last_indexed_tx = icp_reader.getLastReadTxIndex();
                 accounts = Map.size(lmem.accounts);
                 pending = icrc_sender.getPendingCount();
-                actor_principal = lmem.actor_principal;
+                actor_principal = ?me_can;
                 sent = lmem.next_tx_id;
                 reader_instructions_cost;
                 sender_instructions_cost;
                 errors = errors.len();
-                lastTxTime = icrc_reader.getReaderLastTxTime();
+                lastTxTime = icp_reader.getReaderLastTxTime();
             }
         };
 
         /// Get Iter of all accounts owned by the canister (except dust < fee)
         public func accounts() : Iter.Iter<(Blob, Nat)> {
-            Iter.map<(Blob, AccountMem), (Blob, Nat)>(Map.entries<Blob, AccountMem>(lmem.accounts), func((k, v)) {
+            Iter.map<(Blob, VM.AccountMem), (Blob, Nat)>(Map.entries<Blob, VM.AccountMem>(lmem.accounts), func((k, v)) {
                 (k, v.balance - v.in_transit)
             });
         };
 
 
         /// Returns the meta of the ICP ledger
-        public func getMeta() : Meta {
+        public func getMeta() : VM.Meta {
             { // These won't ever change for ICP except fee
                 decimals = 8; 
                 symbol = "ICP";
@@ -406,7 +347,7 @@ module {
 
         /// Returns the ledger reader class
         public func getReader() : IcpReader.Reader {
-            icrc_reader;
+            icp_reader;
         };
 
         /// Send a transfer from a canister owned address
@@ -442,10 +383,10 @@ module {
             callback_onReceive := ?fn;
         };
 
-  
+        registerSubaccount(null);
 
         /// Start the ledger timers
-        ignore Timer.setTimer<system>(#seconds 0, delayed_start);
+        ignore Timer.recurringTimer<system>(#seconds 3600, refreshFee);
     };
 
 

@@ -20,10 +20,18 @@ import TxTypes "./txtypes";
 import IT "mo:itertools/Iter";
 import Iter "mo:base/Iter";
 import Set "mo:map/Set";
+import Ver1 "./memory/v1";
+import MU "mo:mosup";
 
 module {
 
+    public module Mem {
+        public module Sender {
+            public let V1 = Ver1.Sender;
+        };
+    };
 
+    let VM = Mem.Sender.V1;
 
     public type TransactionInput = {
         amount: Nat;
@@ -31,28 +39,7 @@ module {
         from_subaccount : ?Blob;
     };
 
-    public type Transaction = {
-        amount: Nat;
-        to : Ledger.Account;
-        from_subaccount : ?Blob;
-        var created_at_time : Nat64; // 1000000000
-        memo : Blob;
-        var tries: Nat;
-    };
 
-    public type Mem = {
-        transactions : BTree.BTree<Blob, Transaction>;
-        transaction_ids : Set.Set<Nat64>;
-        var stored_owner : ?Principal;
-    };
-
-    public func Mem() : Mem {
-        return {
-            transactions = BTree.init<Blob, Transaction>(?16);
-            transaction_ids = Set.new<Nat64>();
-            var stored_owner = null;
-        };
-    };
     let RETRY_EVERY_SEC:Float = 120_000_000_000;
     let MAX_SENT_EACH_CYCLE:Nat = 125;
 
@@ -73,18 +60,19 @@ module {
 
 
 
-    public class Sender({
-        mem : Mem;
+    public class Sender<system>({
+        xmem : MU.MemShell<VM.Mem>;
         ledger_id: Principal;
         onError: (Text) -> ();
         onConfirmations : ([Nat64]) -> ();
         getFee : () -> Nat;
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         isRegisteredAccount : (Blob) -> Bool;
+        me_can: Principal;
     }) {
-        var started = false;
+        let mem = MU.access(xmem);
+
         let ledger = actor(Principal.toText(ledger_id)) : Ledger.Oneway;
-        let ledger_cb = actor(Principal.toText(ledger_id)) : Ledger.Self;
         var getReaderLastTxTime : ?(() -> (Nat64)) = null;
 
         let blobMin = "\00" : Blob;
@@ -97,8 +85,6 @@ module {
 
 
         private func cycle() : async () {
-            let ?owner = mem.stored_owner else return;
-            if (not started) return;
 
             let inst_start = Prim.performanceCounter(1); // 1 is preserving with async
 
@@ -107,7 +93,7 @@ module {
             let now = Int.abs(Time.now());
             let nowU64 = Nat64.fromNat(now);
 
-            let transactions_to_send = BTree.scanLimit<Blob, Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
+            let transactions_to_send = BTree.scanLimit<Blob, VM.Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
 
             let ?gr_fn = getReaderLastTxTime else Debug.trap("Err getReaderLastTxTime not set");
             let lastReaderTxTime = gr_fn();  // This is the last time the reader has seen a transaction or the current time if there are no more transactions
@@ -121,7 +107,7 @@ module {
             label vtransactions for ((id, tx) in transactions_to_send.results.vals()) {
                 
                 if (tx.amount < fee) {
-                    ignore BTree.delete<Blob, Transaction>(mem.transactions, Blob.compare, id);
+                    ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, id);
                     ignore do ? { Set.delete(mem.transaction_ids, Set.n64hash, txBlobToId(id)!); };
                     continue vtransactions;
                 };
@@ -133,6 +119,7 @@ module {
                 let created_at_adjusted = adjustTXWINDOW(nowU64, tx.created_at_time);
 
                 try {
+                    
                     // Relies on transaction deduplication https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-1/README.md
                     ledger.icrc1_transfer({
                         amount = tx.amount - fee;
@@ -159,7 +146,6 @@ module {
 
 
         public func confirm(txs: [TxTypes.Transaction]) {
-            let ?owner = mem.stored_owner else return;
 
             let confirmations = Vector.new<Nat64>();
             label tloop for (tx in txs.vals()) {
@@ -181,7 +167,7 @@ module {
                 let ?memo = imp.memo else continue tloop;
                 let ?id = DNat64(Blob.toArray(memo)) else continue tloop;
                 
-                ignore BTree.delete<Blob, Transaction>(mem.transactions, Blob.compare, txIdBlob(imp.from, id));
+                ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, txIdBlob(imp.from, id));
                 Set.delete(mem.transaction_ids, Set.n64hash, id);
                 Vector.add<Nat64>(confirmations, id);
             };
@@ -201,8 +187,7 @@ module {
         };
 
         public func send(id:Nat64, tx: TransactionInput) {
-            let ?owner = mem.stored_owner else return;
-            let txr : Transaction = {
+            let txr : VM.Transaction = {
                 amount = tx.amount;
                 to = tx.to;
                 from_subaccount = tx.from_subaccount;
@@ -211,27 +196,17 @@ module {
                 var tries = 0;
             };
             
-            let account = Principal.toLedgerAccount(owner, tx.from_subaccount);
-            ignore BTree.insert<Blob, Transaction>(mem.transactions, Blob.compare, txIdBlob(account, id), txr);
+            let account = Principal.toLedgerAccount(me_can, tx.from_subaccount);
+            ignore BTree.insert<Blob, VM.Transaction>(mem.transactions, Blob.compare, txIdBlob(account, id), txr);
             ignore Set.put(mem.transaction_ids, Set.n64hash, id);
         };
 
-        public func start<system>(owner:?Principal) {
-            if (not Option.isNull(owner)) mem.stored_owner := owner;
-            if (Option.isNull(mem.stored_owner)) return;
 
-            if (started) Debug.trap("already started");
-            started := true;
-            ignore Timer.recurringTimer<system>(#seconds 2, cycle);
-        };
 
         public func isSent(id:Nat64) : Bool {
             not Set.has(mem.transaction_ids, Set.n64hash, id);
         };
 
-        public func stop() {
-            started := false;
-        };
 
         public func ENat64(value : Nat64) : [Nat8] {
             return [
@@ -250,6 +225,9 @@ module {
             if (array.size() != 8) return null;
             return ?(Nat64.fromNat(Nat8.toNat(array[0])) << 56 | Nat64.fromNat(Nat8.toNat(array[1])) << 48 | Nat64.fromNat(Nat8.toNat(array[2])) << 40 | Nat64.fromNat(Nat8.toNat(array[3])) << 32 | Nat64.fromNat(Nat8.toNat(array[4])) << 24 | Nat64.fromNat(Nat8.toNat(array[5])) << 16 | Nat64.fromNat(Nat8.toNat(array[6])) << 8 | Nat64.fromNat(Nat8.toNat(array[7])));
         };
+
+        ignore Timer.recurringTimer<system>(#seconds 2, cycle);
+
     };
 
 };

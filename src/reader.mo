@@ -13,27 +13,28 @@ import Nat64 "mo:base/Nat64";
 import Time "mo:base/Time";
 import Int "mo:base/Int";
 import List "mo:base/List";
+import Ver1 "./memory/v1";
+import MU "mo:mosup";
 
 module {
     public type Transaction = Ledger.CandidBlock;
 
-    public type Mem = {
-            var last_indexed_tx : Nat;
+    public module Mem {
+        public module Reader {
+            public let V1 = Ver1.Reader;
         };
+    };
 
-    type TransactionUnordered = {
-            start : Nat;
-            transactions : [Transaction];
-        };
-        
-    public func Mem() : Mem {
-            return {
-                var last_indexed_tx = 0;
-            };
-        };
+    let VM = Mem.Reader.V1;
 
+
+    public type TransactionUnordered = {
+        start : Nat;
+        transactions : [Transaction];
+    };
+    
     private func transformTransactions(bt : [Transaction]) : [TxTypes.Transaction] {
-        let z = Array.map<Transaction, TxTypes.Transaction>(bt, func (b) {
+        Array.map<Transaction, TxTypes.Transaction>(bt, func (b) {
             let ?op = b.transaction.operation else return #ignored; // Ignore when no operation
             let memo = b.transaction.icrc1_memo;
             let legacy_memo = b.transaction.memo;
@@ -60,15 +61,16 @@ module {
         });
     };
 
-    public class Reader({
-        mem : Mem;
+    public class Reader<system>({
+        xmem : MU.MemShell<VM.Mem>;
         ledger_id : Principal;
         start_from_block: {#id:Nat; #last};
         onError : (Text) -> (); // If error occurs during following and processing it will return the error
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         onRead : ([TxTypes.Transaction], Nat) -> ();
     }) {
-        var started = false;
+        let mem = MU.access(xmem);
+
         let ledger = actor (Principal.toText(ledger_id)) : Ledger.Self;
         var lastTxTime : Nat64 = 0;
 
@@ -76,7 +78,6 @@ module {
         let MAX_TIME_LOCKED:Int = 120_000_000_000; // 120 seconds
 
         private func cycle() : async () {
-            if (not started) return;
 
             let now = Time.now();
             if (now - lock < MAX_TIME_LOCKED) return;
@@ -190,16 +191,14 @@ module {
             lastTxTime;
         };
 
-    
-        public func start<system>() {
-            if (started) Debug.trap("already started");
-            started := true;
-            ignore Timer.recurringTimer<system>(#seconds 2, cycle);
+        public func getLastReadTxIndex() : Nat {
+            mem.last_indexed_tx;
         };
 
-        public func stop() {
-            started := false;
-        }
+   
+
+        ignore Timer.recurringTimer<system>(#seconds 2, cycle);
+
     };
 
 };

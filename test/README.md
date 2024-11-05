@@ -1,32 +1,11 @@
 # Testing
 
-
-Note: If the ledger wasm is too old use get_latest_ledger.sh
-
-1) Start DFX
+1) Requirements `didc` , `mocv` and `apt-get install parallel`
 ```
-dfx start --clean
+https://github.com/ZenVoich/mocv
+https://github.com/dfinity/candid/releases
 ```
 
-2) Deploy ledger 
+2) `yarn install`
 
-```
-cd test/ledger
-rm canisters.json // if starting for the first time after dfx start --clean
-yarn install
-node deploy.js
-```
-
-3) Deploy maker
-```
-dfx deploy
-```
-
-4) Start the maker trough UI (start method)
-
-5) Send tokens (they are a mint transaction)
-```
-node send.js
-```
-
-6) Use maker/user.blast to try different scenarios
+3) `yarn test`
