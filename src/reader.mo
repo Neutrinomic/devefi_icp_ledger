@@ -73,6 +73,7 @@ module {
 
         let ledger = actor (Principal.toText(ledger_id)) : Ledger.Self;
         var lastTxTime : Nat64 = 0;
+        var lastUpdate : Nat64 = 0;
 
         var lock:Int = 0;
         let MAX_TIME_LOCKED:Int = 120_000_000_000; // 120 seconds
@@ -184,11 +185,16 @@ module {
             let inst_end = Prim.performanceCounter(1); // 1 is preserving with async
             onCycleEnd(inst_end - inst_start);
             lock := 0;
+            lastUpdate := Nat64.fromNat(Int.abs(Time.now()));
         };
 
         /// Returns the last tx time or the current time if there are no more transactions to read
         public func getReaderLastTxTime() : Nat64 { 
             lastTxTime;
+        };
+
+        public func getReaderLastUpdate() : Nat64 {
+            lastUpdate;
         };
 
         public func getLastReadTxIndex() : Nat {

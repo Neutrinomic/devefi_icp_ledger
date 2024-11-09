@@ -73,14 +73,14 @@ module {
         let mem = MU.access(xmem);
 
         let ledger = actor(Principal.toText(ledger_id)) : Ledger.Oneway;
-        var getReaderLastTxTime : ?(() -> (Nat64)) = null;
+        var getReaderLastUpdateTime : ?(() -> (Nat64)) = null;
 
         let blobMin = "\00" : Blob;
         let blobMax = "\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF\FF" : Blob;
 
 
-        public func setGetReaderLastTxTime(fn : () -> (Nat64)) {
-            getReaderLastTxTime := ?fn;
+        public func setGetReaderLastUpdateTime(fn : () -> (Nat64)) {
+            getReaderLastUpdateTime := ?fn;
         };
 
 
@@ -95,7 +95,7 @@ module {
 
             let transactions_to_send = BTree.scanLimit<Blob, VM.Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
 
-            let ?gr_fn = getReaderLastTxTime else Debug.trap("Err getReaderLastTxTime not set");
+            let ?gr_fn = getReaderLastUpdateTime else Debug.trap("Err getReaderLastUpdateTime not set");
             let lastReaderTxTime = gr_fn();  // This is the last time the reader has seen a transaction or the current time if there are no more transactions
 
             if (lastReaderTxTime != 0 and lastReaderTxTime < nowU64 - maxReaderLag) {

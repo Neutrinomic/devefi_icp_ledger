@@ -255,7 +255,7 @@ module {
             };
         });
 
-        icrc_sender.setGetReaderLastTxTime(icp_reader.getReaderLastTxTime);
+        icrc_sender.setGetReaderLastUpdateTime(icp_reader.getReaderLastUpdate);
 
         private func refreshFee() : async () {
             try {
