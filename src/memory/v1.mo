@@ -32,6 +32,7 @@ module {
 
         public type Meta = {
             symbol: Text;
+            name: Text;
             decimals: Nat8;
             fee: Nat;
             minter: Account;

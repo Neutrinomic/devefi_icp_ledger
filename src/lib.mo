@@ -331,7 +331,8 @@ module {
                 decimals = 8; 
                 symbol = "ICP";
                 fee = lmem.fee;
-                minter = { owner=minter; subaccount = null}
+                minter = { owner=minter; subaccount = null};
+                name = "Internet Computer";
             }
         };
 
