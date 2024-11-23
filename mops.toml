@@ -1,6 +1,6 @@
 [package]
 name = "devefi-icp-ledger"
-version = "1.5.5"
+version = "1.5.6"
 description = "Local ICP ledger syncing with remote ledger"
 repository = "https://github.com/Neutrinomic/devefi_icp_ledger"
 keywords = [ ]

@@ -30,6 +30,8 @@ module {
 
     let VM = Mem.Ledger.V1;
 
+    public type Meta = VM.Meta;
+
     /// No other errors are currently possible
     public type SendError = {
         #InsufficientFunds;
@@ -286,6 +288,9 @@ module {
             ignore BTree.delete<Blob, Blob>(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me_can, subaccount));
         };
 
+        public func isRegisteredSubaccount(subaccount: ?Blob) : Bool {
+            not Option.isNull(BTree.get(lmem.known_accounts, Blob.compare, Principal.toLedgerAccount(me_can, subaccount)));
+        };
   
 
         /// Returns the actor principal
@@ -325,13 +330,14 @@ module {
         };
 
 
+
         /// Returns the meta of the ICP ledger
         public func getMeta() : VM.Meta {
             { // These won't ever change for ICP except fee
                 decimals = 8; 
                 symbol = "ICP";
                 fee = lmem.fee;
-                minter = { owner=minter; subaccount = null};
+                minter = ?{ owner=minter; subaccount = null};
                 name = "Internet Computer";
             }
         };

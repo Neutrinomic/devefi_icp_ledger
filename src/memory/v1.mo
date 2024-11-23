@@ -35,7 +35,7 @@ module {
             name: Text;
             decimals: Nat8;
             fee: Nat;
-            minter: Account;
+            minter: ?Account;
         };
     };
 
