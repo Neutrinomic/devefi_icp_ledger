@@ -127,7 +127,7 @@ module {
                         from_subaccount = tx.from_subaccount;
                         created_at_time = ?created_at_adjusted;
                         memo = ?tx.memo;
-                        fee = ?fee;
+                        fee = null;
                     });
                     sent_count += 1;
                     tx.tries := Int.abs(time_for_try);
