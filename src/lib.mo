@@ -106,6 +106,7 @@ module {
             };
         };
 
+
         /// Called back with the id of the confirmed transaction. The id returned from the send function. Only one function can be set.
         public func onSent(fn : (Nat64) -> ()) : () {
             assert (Option.isNull(callback_onSent));
