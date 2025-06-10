@@ -149,7 +149,16 @@ module {
 
         private func handle_outgoing_amount(subaccount: ?Blob, amount: Nat) : () {
             let ?acc = Map.get(lmem.accounts, Map.bhash, subaccountToBlob(subaccount)) else return;
-            acc.balance -= amount:Nat;
+
+
+            if (acc.balance < amount) {
+                Debug.print("balance < amount");
+                Debug.print(debug_show({balance = acc.balance; in_transit = acc.in_transit; amount = amount}));
+                acc.balance := 0;
+            } else {
+                acc.balance -= amount:Nat;
+            };
+
 
             // When replaying the ledger we don't have in_transit and it results in natural substraction underflow.
             // since in_transit is local and added when sending
@@ -187,6 +196,7 @@ module {
                 
                 
                 label txloop for (tx in transactions.vals()) {
+                    
                     switch(tx) {
                         case (#u_mint(mint)) {
                             let ?subaccount = BTree.get(lmem.known_accounts, Blob.compare, mint.to) else continue txloop;
