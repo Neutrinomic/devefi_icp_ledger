@@ -64,7 +64,7 @@ module {
         xmem : MU.MemShell<VM.Mem>;
         ledger_id: Principal;
         onError: (Text) -> ();
-        onConfirmations : ([Nat64]) -> ();
+        onConfirmations : ([(Nat64, Nat)]) -> ();
         getFee : () -> Nat;
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         isRegisteredAccount : (Blob) -> Bool;
@@ -106,7 +106,7 @@ module {
             var sent_count = 0;
             label vtransactions for ((id, tx) in transactions_to_send.results.vals()) {
                 
-                if (tx.amount < fee) {
+                if (tx.amount <= fee) {
                     ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, id);
                     ignore do ? { Set.delete(mem.transaction_ids, Set.n64hash, txBlobToId(id)!); };
                     continue vtransactions;
@@ -145,10 +145,11 @@ module {
         };
 
 
-        public func confirm(txs: [TxTypes.Transaction]) {
+        public func confirm(txs: [TxTypes.Transaction], start_id: Nat) {
 
-            let confirmations = Vector.new<Nat64>();
-            label tloop for (tx in txs.vals()) {
+            let confirmations = Vector.new<(Nat64, Nat)>();
+            label tloop for (idx in txs.keys()) {
+                let tx=txs[idx];
                 let imp = switch(tx) { // Our canister realistically will never be the ICP minter
                     case (#u_transfer(t)) {
                         {from=t.from; memo=t.memo};
@@ -169,7 +170,7 @@ module {
                 
                 ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, txIdBlob(imp.from, id));
                 Set.delete(mem.transaction_ids, Set.n64hash, id);
-                Vector.add<Nat64>(confirmations, id);
+                Vector.add<(Nat64, Nat)>(confirmations, (id, start_id + idx));
             };
             onConfirmations(Vector.toArray(confirmations));
         };

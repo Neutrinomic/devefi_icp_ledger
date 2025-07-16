@@ -95,7 +95,7 @@ module {
         var reader_instructions_cost : Nat64 = 0;
 
         var callback_onReceive: ?((Transfer) -> ()) = null;
-        var callback_onSent : ?((Nat64) -> ()) = null;
+        var callback_onSent : ?((Nat64, Nat) -> ()) = null;
         // Sender 
 
 
@@ -108,7 +108,7 @@ module {
 
 
         /// Called back with the id of the confirmed transaction. The id returned from the send function. Only one function can be set.
-        public func onSent(fn : (Nat64) -> ()) : () {
+        public func onSent(fn : (Nat64, Nat) -> ()) : () {
             assert (Option.isNull(callback_onSent));
             callback_onSent := ?fn;
         };
@@ -122,10 +122,11 @@ module {
             xmem = lmem.sender;
             getFee = func () : Nat { lmem.fee };
             onError = logErr; // In case a cycle throws an error
-            onConfirmations = func (confirmations: [Nat64]) {
+            onConfirmations = func (confirmations: [(Nat64, Nat)]) {
                 // handle confirmed ids after sender 
-                for (id in confirmations.vals()) {
-                    ignore do ? { callback_onSent!(id) };
+                for (idx in confirmations.keys()) {
+                    let (id, block_id) = confirmations[idx];
+                    ignore do ? { callback_onSent!(id, block_id) };
                 };
             };
             onCycleEnd = func (i: Nat64) { sender_instructions_cost := i }; // used to measure how much instructions it takes to send transactions in one cycle
@@ -191,8 +192,8 @@ module {
             onError = logErr; // In case a cycle throws an error
             onCycleEnd = func (i: Nat64) { reader_instructions_cost := i }; // returns the instructions the cycle used. 
                                                         // It can include multiple calls to onRead
-            onRead = func (transactions: [TxTypes.Transaction], _) {
-                icrc_sender.confirm(transactions);
+            onRead = func (transactions: [TxTypes.Transaction], start_id: Nat) {
+                icrc_sender.confirm(transactions, start_id);
                 
                 
                 label txloop for (tx in transactions.vals()) {

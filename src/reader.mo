@@ -100,7 +100,10 @@ module {
                             start = 0;
                             length = 0;
                         });
-                        // Debug.print("x1");
+                        if (rez.chain_length == 0) {
+                            lock := 0;
+                            return;
+                        };
                         mem.last_indexed_tx := Nat64.toNat(rez.chain_length) -1;
                     };
                 };
@@ -131,7 +134,7 @@ module {
 
                 for (atx in rez.archived_blocks.vals()) {
                     
-                    let args_starts = Array.tabulate<Nat>(Nat.min(40, 1 + Nat64.toNat(atx.length/2000)), func(i) = Nat64.toNat(atx.start) + i*2000);
+                    let args_starts = Array.tabulate<Nat>(Nat.min(40, ((Nat64.toNat(atx.length) + 2000 -1)/2000)), func(i) = Nat64.toNat(atx.start) + i*2000);
                     let args = Array.map<Nat, Ledger.GetBlocksArgs>( args_starts, func(i) = {start = Nat64.fromNat(i); length = if (i-Nat64.toNat(atx.start):Nat+2000 <= Nat64.toNat(atx.length)) 2000 else atx.length + atx.start - Nat64.fromNat(i)  });
 
                     var buf = List.nil<async Ledger.ArchiveResult>();
