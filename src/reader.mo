@@ -122,11 +122,13 @@ module {
 
             if (rez.archived_blocks.size() == 0) {
                 // We can just process the transactions that are inside the ledger and not inside archive
-                onRead(transformTransactions(rez.blocks), mem.last_indexed_tx );
-                mem.last_indexed_tx += rez.blocks.size();
-      
-                // Set the time of the last transaction
-                if (rez.blocks.size() != 0) lastTxTime := rez.blocks[rez.blocks.size() - 1].timestamp.timestamp_nanos;
+                if (rez.blocks.size() != 0) {
+                    onRead(transformTransactions(rez.blocks), mem.last_indexed_tx );
+                    mem.last_indexed_tx += rez.blocks.size();
+        
+                    // Set the time of the last transaction
+                    lastTxTime := rez.blocks[rez.blocks.size() - 1].timestamp.timestamp_nanos;
+                }
            
             } else {
                 // We need to collect transactions from archive and get them in order
