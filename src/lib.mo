@@ -17,7 +17,10 @@ import Array "mo:base/Array";
 import Iter "mo:base/Iter";
 import BTree "mo:stableheapbtreemap/BTree";
 import Ver1 "./memory/v1";
+import Ver2 "./memory/v2";
 import MU "mo:mosup";
+import Time "mo:base/Time";
+import Int "mo:base/Int";
 
 module {
     type R<A,B> = Result.Result<A,B>;
@@ -25,16 +28,20 @@ module {
     public module Mem {
         public module Ledger {
             public let V1 = Ver1.Ledger;
+            public let V2 = Ver2.Ledger;
         };
     };
 
-    let VM = Mem.Ledger.V1;
+    let VM = Mem.Ledger.V2;
 
     public type Meta = VM.Meta;
 
     /// No other errors are currently possible
     public type SendError = {
         #InsufficientFunds;
+        #InvalidSubaccount;
+        #InvalidMemo;
+        #UnsupportedAccount;
     };
 
  
@@ -49,7 +56,7 @@ module {
         last_indexed_tx: Nat;
         accounts: Nat;
         pending: Nat;
-        actor_principal: ?Principal;
+        actor_principal: Principal;
         sender_instructions_cost : Nat64;
         reader_instructions_cost : Nat64;
         errors : Nat;
@@ -305,6 +312,11 @@ module {
         };
   
 
+        public func getRegisteredAccount(aid: Blob) : ?ICRCLedger.Account {
+            let ?subaccount = BTree.get(lmem.known_accounts, Blob.compare, aid) else return null;
+            ?{owner=me_can; subaccount=formatSubaccount(subaccount)};
+        };
+
         /// Returns the actor principal
         public func me() : Principal {
             me_can;
@@ -325,7 +337,7 @@ module {
                 last_indexed_tx = icp_reader.getLastReadTxIndex();
                 accounts = Map.size(lmem.accounts);
                 pending = icrc_sender.getPendingCount();
-                actor_principal = ?me_can;
+                actor_principal = me_can;
                 sent = lmem.next_tx_id;
                 reader_instructions_cost;
                 sender_instructions_cost;
@@ -376,8 +388,41 @@ module {
             let ?acc = Map.get(lmem.accounts, Map.bhash, subaccountToBlob(tr.from_subaccount)) else return #err(#InsufficientFunds);
             if (acc.balance:Nat - acc.in_transit:Nat < tr.amount) return #err(#InsufficientFunds);
             acc.in_transit += tr.amount;
-            let id = lmem.next_tx_id;
-            lmem.next_tx_id += 1;
+
+       
+            // Verify send to is valid
+            switch(tr.to) {
+                case (#icrc(to)) {
+                    switch(to.subaccount) {
+                        case (?subaccount) {
+                            if (subaccount.size() != 32) return #err(#InvalidSubaccount);
+                            ignore do ? { if (tr.memo!.size() > 32) return #err(#InvalidMemo)};
+                        };
+                        case (null) ();
+                    };
+                };
+                case (#icp(to)) {
+                    if (to.size() != 32) return #err(#InvalidSubaccount);
+                    ignore do ? { if (tr.memo!.size() != 8) return #err(#InvalidMemo)};
+                };
+            };
+
+            var created_at_time = (Nat64.fromNat(Int.abs(Time.now()))/1_000_000_000)*1_000_000_000; 
+
+            if (icrc_sender.isTimeReserved(created_at_time)) {
+                created_at_time += 1_000_000_000;
+            };
+
+
+            let id = if (lmem.next_tx_id >= created_at_time) {
+                    lmem.next_tx_id += 1;
+                    lmem.next_tx_id;
+                } else {
+                    lmem.next_tx_id := created_at_time;
+                    created_at_time;
+                };
+
+
             icrc_sender.send(id, tr);
             #ok(id);
         };

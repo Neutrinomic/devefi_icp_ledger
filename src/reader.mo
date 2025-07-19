@@ -79,8 +79,7 @@ module {
         let MAX_TIME_LOCKED:Int = 120_000_000_000; // 120 seconds
 
         private func cycle() : async () {
-            // Debug.print("icp read");
-
+        
             let now = Time.now();
             if (now - lock < MAX_TIME_LOCKED) {
                 // Debug.print("locked");
@@ -115,7 +114,7 @@ module {
                 start = Nat64.fromNat(mem.last_indexed_tx);
                 length = 2000*40; // later we run up to 40 queries in parallel 
             });
-            // Debug.print("x2");
+
 
             if (query_start != mem.last_indexed_tx) {lock:=0; return;};
 

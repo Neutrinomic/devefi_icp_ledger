@@ -4,6 +4,7 @@ import Debug "mo:base/Debug";
 import Nat "mo:base/Nat";
 import Float "mo:base/Float";
 import Ledger "./icp_ledger";
+import ICRCLedger "./icrc_ledger";
 import Principal "mo:base/Principal";
 import Vector "mo:vector";
 import Timer "mo:base/Timer";
@@ -21,6 +22,7 @@ import IT "mo:itertools/Iter";
 import Iter "mo:base/Iter";
 import Set "mo:map/Set";
 import Ver1 "./memory/v1";
+import Ver2 "./memory/v2";
 import MU "mo:mosup";
 
 module {
@@ -28,24 +30,29 @@ module {
     public module Mem {
         public module Sender {
             public let V1 = Ver1.Sender;
+            public let V2 = Ver2.Sender;
         };
     };
 
-    let VM = Mem.Sender.V1;
+    let VM = Mem.Sender.V2;
+    let VGM = Ver2;
 
     public type TransactionInput = {
         amount: Nat;
-        to: Ledger.Account;
+        to: VGM.AccountMixed;
         from_subaccount : ?Blob;
+        memo : ?Blob;
     };
 
 
     let RETRY_EVERY_SEC:Float = 120_000_000_000;
     let MAX_SENT_EACH_CYCLE:Nat = 125;
 
+    // let permittedDriftNanos : Nat64 = 60_000_000_000;
+    // let transactionWindowNanos : Nat64 = 86400_000_000_000;
     let permittedDriftNanos : Nat64 = 60_000_000_000;
     let transactionWindowNanos : Nat64 = 86400_000_000_000;
-    let retryWindow : Nat64 = 172800_000_000_000; // 2 x transactionWindowNanos
+    public let retryWindow : Nat64 = 72200_000_000_000; // 2 x transactionWindowNanos
 
     let maxReaderLag : Nat64 = 1800_000_000_000; // 30 minutes
 
@@ -69,8 +76,12 @@ module {
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         isRegisteredAccount : (Blob) -> Bool;
         me_can: Principal;
+        
     }) {
         let mem = MU.access(xmem);
+        let minter = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
+        let minter_icrc = {owner=minter; subaccount=null};
+        let minter_aid = Principal.toLedgerAccount(minter, null);
 
         let ledger = actor(Principal.toText(ledger_id)) : Ledger.Oneway;
         var getReaderLastUpdateTime : ?(() -> (Nat64)) = null;
@@ -83,6 +94,14 @@ module {
             getReaderLastUpdateTime := ?fn;
         };
 
+        var retry_id : Nat64 = 0;
+
+        // We will reserve the time used by retry transactions which slipped out of the window
+        public func isTimeReserved(time: Nat64) : Bool {
+          let start = (time / retryWindow) * retryWindow;
+          let end = start + 1_000_000_000;
+          return time >= start and time < end;
+        };
 
         private func cycle() : async () {
 
@@ -104,31 +123,96 @@ module {
             };
 
             var sent_count = 0;
-            label vtransactions for ((id, tx) in transactions_to_send.results.vals()) {
+            label vtransactions for ((internal_id, tx) in transactions_to_send.results.vals()) {
                 
                 if (tx.amount <= fee) {
-                    ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, id);
-                    ignore do ? { Set.delete(mem.transaction_ids, Set.n64hash, txBlobToId(id)!); };
+                    ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, internal_id);
+                    ignore do ? { Set.delete(mem.transaction_ids, Set.n64hash, txBlobToId(internal_id)!); };
                     continue vtransactions;
                 };
+
+                let tx_aid = Principal.toLedgerAccount(me_can, tx.from_subaccount);
 
                 let time_for_try = Float.toInt(Float.ceil((Float.fromInt(now - Nat64.toNat(tx.created_at_time)))/RETRY_EVERY_SEC));
 
                 if (tx.tries >= time_for_try) continue vtransactions;
                 
-                let created_at_adjusted = adjustTXWINDOW(nowU64, tx.created_at_time);
+                var created_at_adjusted = adjustTXWINDOW(nowU64, tx.created_at_time);
+
+                if (created_at_adjusted != tx.created_at_time) {
+                    // Since we are now sending it with a different created_at_time, we need to delete the old one and insert the new one
+                    // Or we won't be able to see it in the ledger
+                    let old_id = internal_id;
+                    created_at_adjusted += retry_id;
+                    tx.created_at_time := created_at_adjusted;
+                    retry_id += 1;
+                    if (retry_id > 1_000_000_000) retry_id := 0;
+                    assert(isTimeReserved(created_at_adjusted));
+                    let new_id = txIdBlob(tx_aid, created_at_adjusted);
+                    if (not BTree.has(mem.transactions, Blob.compare, new_id)) {
+                        ignore BTree.insert<Blob, VM.Transaction>(mem.transactions, Blob.compare, new_id, tx);
+                        ignore Set.put(mem.transaction_ids, Set.n64hash, created_at_adjusted);
+                        ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, old_id);
+                        ignore do ? { Set.delete(mem.transaction_ids, Set.n64hash, txBlobToId(old_id)!); };
+                    } else {
+                        continue vtransactions;
+                    }
+                };
 
                 try {
                     
                     // Relies on transaction deduplication https://github.com/dfinity/ICRC-1/blob/main/standards/ICRC-1/README.md
-                    ledger.icrc1_transfer({
-                        amount = tx.amount - fee;
-                        to = tx.to;
-                        from_subaccount = tx.from_subaccount;
-                        created_at_time = ?created_at_adjusted;
-                        memo = ?tx.memo;
-                        fee = null;
-                    });
+                    switch(tx.to) {
+                        case (#icrc(to)) {
+                            if(to == minter_icrc) {
+                                // BURN
+                                    ledger.icrc1_transfer({
+                                        amount = tx.amount;
+                                        to = to;
+                                        from_subaccount = tx.from_subaccount;
+                                        created_at_time = ?created_at_adjusted;
+                                        memo = ?tx.memo;
+                                        fee = null;
+                                    });
+                                } else {
+                                    ledger.icrc1_transfer({
+                                        amount = tx.amount - fee;
+                                        to = to;
+                                        from_subaccount = tx.from_subaccount;
+                                        created_at_time = ?created_at_adjusted;
+                                        memo = ?tx.memo;
+                                        fee = null;
+                                    });
+                                };
+                           
+                        };
+                        case (#icp(to)) {
+                            let nat64_memo:Nat64 = Option.get(DNat64(Blob.toArray(tx.memo)), 1:Nat64); 
+                            if (to == minter_aid) {
+                                // BURN
+                                    ledger.transfer({
+                                        amount = {e8s = Nat64.fromNat(tx.amount)};
+                                        to = to;
+                                        from_subaccount = tx.from_subaccount;
+                                        created_at_time = ?{timestamp_nanos = created_at_adjusted};
+                                        memo = nat64_memo;
+                                        fee = {e8s = 0};
+                                    });  
+                                } else {
+                                    ledger.transfer({
+                                        amount = {e8s = Nat64.fromNat(tx.amount - fee)};
+                                        to = to;
+                                        from_subaccount = tx.from_subaccount;
+                                        created_at_time = ?{timestamp_nanos = created_at_adjusted};
+                                        memo = nat64_memo;
+                                        fee = {e8s = Nat64.fromNat(fee)};
+                                    });
+                                }
+                          
+                            
+                        };
+                    };
+                    
                     sent_count += 1;
                     tx.tries := Int.abs(time_for_try);
                 } catch (e) { 
@@ -152,22 +236,22 @@ module {
                 let tx=txs[idx];
                 let imp = switch(tx) { // Our canister realistically will never be the ICP minter
                     case (#u_transfer(t)) {
-                        {from=t.from; memo=t.memo};
+                        {from=t.from; createdAt=t.created_at_time};
                     };
                     case (#u_burn(b)) {
-                        {from=b.from; memo=b.memo};
+                        {from=b.from; createdAt=b.created_at_time};
                     };
                     case (_) continue tloop;
                 };
-                // let ?tr = tx.transfer else continue tloop;
-                // if (tr.from.owner != owner) continue tloop;
+   
 
                 // Check if from is registered subaccount owned by this canister
                 if (not isRegisteredAccount(imp.from)) continue tloop; // Transaction not coming from us
-
-                let ?memo = imp.memo else continue tloop;
-                let ?id = DNat64(Blob.toArray(memo)) else continue tloop;
+                // Registered subaccounts can only belong to this canister
+                // And only this canister can send from them, so if it's registered, it comes from this canister
                 
+                let id = imp.createdAt;
+
                 ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, txIdBlob(imp.from, id));
                 Set.delete(mem.transaction_ids, Set.n64hash, id);
                 Vector.add<(Nat64, Nat)>(confirmations, (id, start_id + idx));
@@ -192,8 +276,11 @@ module {
                 amount = tx.amount;
                 to = tx.to;
                 from_subaccount = tx.from_subaccount;
-                var created_at_time = Nat64.fromNat(Int.abs(Time.now()));
-                memo = Blob.fromArray(ENat64(id));
+                var created_at_time = id;
+                memo = switch(tx.memo) {
+                    case (null) Blob.fromArray(ENat64(1)); // Always needs memo for deduplication to work
+                    case (?m) m;
+                }; 
                 var tries = 0;
             };
             

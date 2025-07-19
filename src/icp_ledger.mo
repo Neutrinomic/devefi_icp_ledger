@@ -172,7 +172,7 @@ module {
     #TemporarilyUnavailable;
     #BadBurn : { min_burn_amount : Nat };
     #Duplicate : { duplicate_of : Nat };
-    #BadFee : { expected_fee : Nat };
+  #BadFee : { expected_fee : Nat };
     #CreatedInFuture : { ledger_time : Nat64 };
     #TooOld;
     #InsufficientFunds : { balance : Nat };
@@ -240,5 +240,6 @@ module {
 
   public type Oneway = actor {
     icrc1_transfer : shared TransferArg -> ();
+    transfer : shared TransferArgs -> ();
   }
 }
