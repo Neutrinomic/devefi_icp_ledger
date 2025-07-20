@@ -12,7 +12,7 @@ module {
             accounts = Map.new<Blob, AccountMem>();
             known_accounts = BTree.init<Blob, Blob>(?16);
             var fee = 10000;
-            var next_tx_id = 0;
+            var next_tx_id = 100;
         });
 
         /// Local account memory

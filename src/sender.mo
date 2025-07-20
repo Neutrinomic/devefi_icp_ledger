@@ -180,6 +180,7 @@ module {
                         };
                         case (#icp(to)) {
                             let nat64_memo:Nat64 = Option.get(DNat64(Blob.toArray(tx.memo)), 1:Nat64); 
+         
                             if (to == minter_aid) {
                                 // BURN
                                     ledger.transfer({
@@ -226,12 +227,44 @@ module {
             let confirmations = Vector.new<(Nat64, Nat)>();
             label tloop for (idx in txs.keys()) {
                 let tx=txs[idx];
-                let imp = switch(tx) { // Our canister realistically will never be the ICP minter
+
+
+                // After the upgrade we should just return created_at_time and simplify this code
+
+                let imp = switch(tx) { // Our canister realistically will never be the ICP minter. Dont use the middleware for anything other than the real ICP
                     case (#u_transfer(t)) {
-                        {from=t.from; createdAt=t.created_at_time};
+                        switch(t.memo) {
+                            case (null) { // no icrc memo, we've used the icp memo
+                                {from=t.from; id=t.created_at_time};
+                            };
+                            case (?memo) {
+                               switch(memoToId(memo)) { 
+                                case (null) {
+                                    {from=t.from; id=t.created_at_time};
+                                };
+                                case (?id) {
+                                    {from=t.from; id=id};
+                                };
+                            };
+                            }
+                        }
                     };
-                    case (#u_burn(b)) {
-                        {from=b.from; createdAt=b.created_at_time};
+                    case (#u_burn(t)) {
+                       switch(t.memo) {
+                            case (null) { // no icrc memo, we've used the icp memo
+                                {from=t.from; id=t.created_at_time};
+                            };
+                            case (?memo) {
+                               switch(memoToId(memo)) { 
+                                case (null) {
+                                    {from=t.from; id=t.created_at_time};
+                                };
+                                case (?id) {
+                                    {from=t.from; id=id};
+                                };
+                            };
+                            }
+                        }
                     };
                     case (_) continue tloop;
                 };
@@ -242,11 +275,13 @@ module {
                 // Registered subaccounts can only belong to this canister
                 // And only this canister can send from them, so if it's registered, it comes from this canister
                 
-                let id = imp.createdAt;
+                let id = imp.id;
 
                 ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, txIdBlob(imp.from, id));
                 Set.delete(mem.transaction_ids, Set.n64hash, id);
                 Vector.add<(Nat64, Nat)>(confirmations, (id, start_id + idx));
+
+
             };
             onConfirmations(Vector.toArray(confirmations));
         };
@@ -256,7 +291,13 @@ module {
         };
 
         private func txBlobToId(blob:Blob) : ?Nat64 {
-            DNat64(Array.subArray(Blob.toArray(blob), 32, 8));
+            DNat64(Array.subArray(Blob.toArray(blob), 32, 8))
+        };
+
+        private func memoToId(memo:Blob) : ?Nat64 {
+            let ?id = DNat64(Blob.toArray(memo)) else return null;
+            if (id == 1 or id == 0) return null;
+            return ?id;
         };
 
         public func getPendingCount() : Nat {
