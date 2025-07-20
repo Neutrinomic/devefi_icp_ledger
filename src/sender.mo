@@ -50,8 +50,7 @@ module {
 
     // let permittedDriftNanos : Nat64 = 60_000_000_000;
     // let transactionWindowNanos : Nat64 = 86400_000_000_000;
-    let permittedDriftNanos : Nat64 = 60_000_000_000;
-    let transactionWindowNanos : Nat64 = 86400_000_000_000;
+  
     public let retryWindow : Nat64 = 72200_000_000_000; // 2 x transactionWindowNanos
 
     let maxReaderLag : Nat64 = 1800_000_000_000; // 30 minutes

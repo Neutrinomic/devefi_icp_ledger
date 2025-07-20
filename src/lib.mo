@@ -134,7 +134,7 @@ module {
             if (lmem.next_tx_id >= 1_000_000_000) lmem.next_tx_id := 0;
             return id;
         };
-        
+
         let icrc_sender = IcpSender.Sender<system>({
             ledger_id;
             xmem = lmem.sender;
@@ -294,7 +294,7 @@ module {
             try {
             let ledger = actor (Principal.toText(ledger_id)) : ICPLedger.Self;
             lmem.fee := await ledger.icrc1_fee();
-            } catch (e) {}
+            } catch (_e) {}
         };
  
 
@@ -345,7 +345,6 @@ module {
                 accounts = Map.size(lmem.accounts);
                 pending = icrc_sender.getPendingCount();
                 actor_principal = me_can;
-                sent = lmem.next_tx_id;
                 reader_instructions_cost;
                 sender_instructions_cost;
                 errors = errors.len();
