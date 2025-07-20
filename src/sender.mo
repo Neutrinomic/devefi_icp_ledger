@@ -76,6 +76,7 @@ module {
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         isRegisteredAccount : (Blob) -> Bool;
         me_can: Principal;
+        genNextSendId : (?Nat64) -> Nat64;
         
     }) {
         let mem = MU.access(xmem);
@@ -94,14 +95,7 @@ module {
             getReaderLastUpdateTime := ?fn;
         };
 
-        var retry_id : Nat64 = 0;
 
-        // We will reserve the time used by retry transactions which slipped out of the window
-        public func isTimeReserved(time: Nat64) : Bool {
-          let start = (time / retryWindow) * retryWindow;
-          let end = start + 1_000_000_000;
-          return time >= start and time < end;
-        };
 
         private func cycle() : async () {
 
@@ -143,11 +137,10 @@ module {
                     // Since we are now sending it with a different created_at_time, we need to delete the old one and insert the new one
                     // Or we won't be able to see it in the ledger
                     let old_id = internal_id;
-                    created_at_adjusted += retry_id;
+                    let new_tsid = genNextSendId(?created_at_adjusted);
+                    created_at_adjusted := new_tsid;
                     tx.created_at_time := created_at_adjusted;
-                    retry_id += 1;
-                    if (retry_id > 1_000_000_000) retry_id := 0;
-                    assert(isTimeReserved(created_at_adjusted));
+                   
                     let new_id = txIdBlob(tx_aid, created_at_adjusted);
                     if (not BTree.has(mem.transactions, Blob.compare, new_id)) {
                         ignore BTree.insert<Blob, VM.Transaction>(mem.transactions, Blob.compare, new_id, tx);

@@ -124,6 +124,17 @@ module {
             not Option.isNull(BTree.get(lmem.known_accounts, Blob.compare, aid));
         };
 
+
+        public func genNextSendId(t: ?Nat64) : Nat64 {
+            let created_at_time = (Option.get(t, Nat64.fromNat(Int.abs(Time.now())))/1_000_000_000)*1_000_000_000;
+            
+
+            let id = created_at_time + lmem.next_tx_id;
+            lmem.next_tx_id += 1;
+            if (lmem.next_tx_id >= 1_000_000_000) lmem.next_tx_id := 0;
+            return id;
+        };
+        
         let icrc_sender = IcpSender.Sender<system>({
             ledger_id;
             xmem = lmem.sender;
@@ -139,6 +150,7 @@ module {
             onCycleEnd = func (i: Nat64) { sender_instructions_cost := i }; // used to measure how much instructions it takes to send transactions in one cycle
             isRegisteredAccount;
             me_can;
+            genNextSendId;
         });
         
         private func handle_incoming_amount(subaccount: ?Blob, amount: Nat) : () {
@@ -285,11 +297,6 @@ module {
             } catch (e) {}
         };
  
-        public func genNextSendId() : Nat64 {
-            let id = lmem.next_tx_id;
-            lmem.next_tx_id += 1;
-            id;
-        };
 
         public func isSent(id : Nat64) : Bool {
             if (id >= lmem.next_tx_id) return false;
@@ -387,9 +394,7 @@ module {
         public func send(tr: IcpSender.TransactionInput) : R<Nat64, SendError> { // The amount we send includes the fee. meaning recepient will get the amount - fee
             let ?acc = Map.get(lmem.accounts, Map.bhash, subaccountToBlob(tr.from_subaccount)) else return #err(#InsufficientFunds);
             if (acc.balance:Nat - acc.in_transit:Nat < tr.amount) return #err(#InsufficientFunds);
-            acc.in_transit += tr.amount;
-
-       
+            
             // Verify send to is valid
             switch(tr.to) {
                 case (#icrc(to)) {
@@ -407,21 +412,9 @@ module {
                 };
             };
 
-            var created_at_time = (Nat64.fromNat(Int.abs(Time.now()))/1_000_000_000)*1_000_000_000; 
+            acc.in_transit += tr.amount;
 
-            if (icrc_sender.isTimeReserved(created_at_time)) {
-                created_at_time += 1_000_000_000;
-            };
-
-
-            let id = if (lmem.next_tx_id >= created_at_time) {
-                    lmem.next_tx_id += 1;
-                    lmem.next_tx_id;
-                } else {
-                    lmem.next_tx_id := created_at_time;
-                    created_at_time;
-                };
-
+            let id = genNextSendId(null);
 
             icrc_sender.send(id, tr);
             #ok(id);

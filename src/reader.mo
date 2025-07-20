@@ -87,6 +87,8 @@ module {
             };
             lock := now;
 
+
+            var reached_end = false;
             let inst_start = Prim.performanceCounter(1); // 1 is preserving with async
 
             if (mem.last_indexed_tx == 0) {
@@ -118,13 +120,14 @@ module {
 
             if (query_start != mem.last_indexed_tx) {lock:=0; return;};
 
+            if (rez.blocks.size() < 2000) reached_end := true;
 
             if (rez.archived_blocks.size() == 0) {
                 // We can just process the transactions that are inside the ledger and not inside archive
                 if (rez.blocks.size() != 0) {
                     onRead(transformTransactions(rez.blocks), mem.last_indexed_tx );
                     mem.last_indexed_tx += rez.blocks.size();
-        
+                    
                     // Set the time of the last transaction
                     lastTxTime := rez.blocks[rez.blocks.size() - 1].timestamp.timestamp_nanos;
                 }
@@ -195,7 +198,9 @@ module {
             let inst_end = Prim.performanceCounter(1); // 1 is preserving with async
             onCycleEnd(inst_end - inst_start);
             lock := 0;
-            lastUpdate := Nat64.fromNat(Int.abs(Time.now()));
+
+            // only if we reached the end we update the last update time, so that new transactions wont be sent if we are lagging behind
+            if (reached_end) lastUpdate := Nat64.fromNat(Int.abs(Time.now()));
         };
 
         /// Returns the last tx time or the current time if there are no more transactions to read
