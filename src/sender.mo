@@ -51,9 +51,9 @@ module {
     // let permittedDriftNanos : Nat64 = 60_000_000_000;
     // let transactionWindowNanos : Nat64 = 86400_000_000_000;
   
-    public let retryWindow : Nat64 = 72200_000_000_000; // 2 x transactionWindowNanos
+    public let retryWindow : Nat64 = 72200_000_000_000;
 
-    let maxReaderLag : Nat64 = 1800_000_000_000; // 30 minutes
+    let maxReaderLag : Nat64 = 20_000_000_000; // 20 seconds
 
 
     private func adjustTXWINDOW(now:Nat64, time : Nat64) : Nat64 {
@@ -110,7 +110,7 @@ module {
             let ?gr_fn = getReaderLastUpdateTime else Debug.trap("Err getReaderLastUpdateTime not set");
             let lastReaderTxTime = gr_fn();  // This is the last time the reader has seen a transaction or the current time if there are no more transactions
 
-            if (lastReaderTxTime != 0 and lastReaderTxTime < nowU64 - maxReaderLag) {
+            if (lastReaderTxTime < nowU64 - maxReaderLag) {
                 onError("Reader is lagging behind by " # Nat64.toText(nowU64 - lastReaderTxTime));
                 return; // Don't attempt to send transactions if the reader is lagging too far behind
             };

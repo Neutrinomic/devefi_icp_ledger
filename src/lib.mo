@@ -443,6 +443,9 @@ module {
 
         /// Start the ledger timers
         ignore Timer.recurringTimer<system>(#seconds 3600, refreshFee);
+        ignore Timer.setTimer<system>(#seconds 1, func() : async () {
+           await refreshFee();
+        });
     };
 
 
