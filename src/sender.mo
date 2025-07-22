@@ -233,38 +233,10 @@ module {
 
                 let imp = switch(tx) { // Our canister realistically will never be the ICP minter. Dont use the middleware for anything other than the real ICP
                     case (#u_transfer(t)) {
-                        switch(t.memo) {
-                            case (null) { // no icrc memo, we've used the icp memo
-                                {from=t.from; id=t.created_at_time};
-                            };
-                            case (?memo) {
-                               switch(memoToId(memo)) { 
-                                case (null) {
-                                    {from=t.from; id=t.created_at_time};
-                                };
-                                case (?id) {
-                                    {from=t.from; id=id};
-                                };
-                            };
-                            }
-                        }
+                        {from=t.from; id=t.created_at_time};
                     };
                     case (#u_burn(t)) {
-                       switch(t.memo) {
-                            case (null) { // no icrc memo, we've used the icp memo
-                                {from=t.from; id=t.created_at_time};
-                            };
-                            case (?memo) {
-                               switch(memoToId(memo)) { 
-                                case (null) {
-                                    {from=t.from; id=t.created_at_time};
-                                };
-                                case (?id) {
-                                    {from=t.from; id=id};
-                                };
-                            };
-                            }
-                        }
+                        {from=t.from; id=t.created_at_time};
                     };
                     case (_) continue tloop;
                 };
