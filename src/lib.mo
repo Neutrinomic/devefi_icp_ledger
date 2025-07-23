@@ -50,6 +50,7 @@ module {
         a;
     };
 
+    public type TransactionShared = IcpSender.TransactionShared;
 
     /// Info about local ledger params returned by getInfo
     public type Info = {
@@ -152,7 +153,11 @@ module {
             me_can;
             genNextSendId;
         });
-        
+
+        public func getPendingTransactions() : [IcpSender.TransactionShared] {
+            icrc_sender.getPendingTransactions();
+        };
+
         private func handle_incoming_amount(subaccount: ?Blob, amount: Nat) : () {
             switch(Map.get<Blob, VM.AccountMem>(lmem.accounts, Map.bhash, subaccountToBlob(subaccount))) {
                 case (?acc) {

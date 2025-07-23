@@ -92,7 +92,7 @@ module {
             amount: Nat;
             to : AccountMixed;
             from_subaccount : ?Blob;
-            var created_at_time : Nat64; // 1000000000
+            var created_at_time : Nat64; 
             memo : Blob;
             var tries: Nat;
         };

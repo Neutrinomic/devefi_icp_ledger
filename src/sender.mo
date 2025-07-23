@@ -44,6 +44,15 @@ module {
         memo : ?Blob;
     };
 
+    public type TransactionShared = {
+        id: {#n64:Nat64; #blob:Blob};
+        amount: Nat;
+        to : VGM.AccountMixed;
+        from_subaccount : ?Blob;
+        created_at_time : Nat64; 
+        memo : Blob;
+        tries: Nat;
+    };
 
     let RETRY_EVERY_SEC:Float = 120_000_000_000;
     let MAX_SENT_EACH_CYCLE:Nat = 125;
@@ -312,6 +321,24 @@ module {
                 Nat8.fromNat(Nat64.toNat((value >> 8) & 255)),
                 Nat8.fromNat(Nat64.toNat(value & 255)),
             ];
+        };
+
+  
+
+        public func getPendingTransactions() : [TransactionShared] {
+            let transactions = BTree.scanLimit<Blob, VM.Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
+            let transactions_shared = Iter.map<(Blob, VM.Transaction), TransactionShared>(transactions.results.vals(), func(e : (Blob, VM.Transaction)) : TransactionShared {
+                {
+                    id = #blob(e.0);
+                    amount = e.1.amount;
+                    to = e.1.to;
+                    from_subaccount = e.1.from_subaccount;
+                    created_at_time = e.1.created_at_time;
+                    memo = e.1.memo;
+                    tries = e.1.tries;
+                };
+            });
+            return Iter.toArray(transactions_shared);
         };
 
         public func DNat64(array : [Nat8]) : ?Nat64 {
