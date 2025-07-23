@@ -154,6 +154,8 @@ module {
             genNextSendId;
         });
 
+        public let sender = icrc_sender;
+
         public func getPendingTransactions() : [IcpSender.TransactionShared] {
             icrc_sender.getPendingTransactions();
         };

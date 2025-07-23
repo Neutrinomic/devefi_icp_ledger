@@ -323,7 +323,15 @@ module {
             ];
         };
 
-  
+         // Clear pending transactions with > 200 tries
+        public func clearPendingTransactions() {
+            let transactions = BTree.scanLimit<Blob, VM.Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
+            for ((id, tx) in transactions.results.vals()) {
+                if (tx.tries > 200) {
+                    ignore BTree.delete<Blob, VM.Transaction>(mem.transactions, Blob.compare, id);
+                };
+            };
+        };
 
         public func getPendingTransactions() : [TransactionShared] {
             let transactions = BTree.scanLimit<Blob, VM.Transaction>(mem.transactions, Blob.compare, blobMin, blobMax, #fwd, 3000);
