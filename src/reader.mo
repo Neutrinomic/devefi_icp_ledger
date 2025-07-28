@@ -64,7 +64,7 @@ module {
         start_from_block: {#id:Nat; #last};
         onError : (Text) -> (); // If error occurs during following and processing it will return the error
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
-        onRead : ([TxTypes.Transaction], Nat) -> ();
+        onRead : <system>([TxTypes.Transaction], Nat) -> ();
     }) {
         let mem = MU.access(xmem);
 
@@ -120,7 +120,7 @@ module {
             if (rez.archived_blocks.size() == 0) {
                 // We can just process the transactions that are inside the ledger and not inside archive
                 if (rez.blocks.size() != 0) {
-                    onRead(transformTransactions(rez.blocks), mem.last_indexed_tx );
+                    onRead<system>(transformTransactions(rez.blocks), mem.last_indexed_tx );
                     mem.last_indexed_tx += rez.blocks.size();
                     
                     // Set the time of the last transaction
@@ -178,13 +178,13 @@ module {
                         lock := 0;
                         return;
                     };
-                    onRead(transformTransactions(u.transactions), mem.last_indexed_tx );
+                    onRead<system>(transformTransactions(u.transactions), mem.last_indexed_tx );
                     mem.last_indexed_tx += u.transactions.size();
                     if (u.transactions.size() != 0) lastTxTime := u.transactions[u.transactions.size() - 1].timestamp.timestamp_nanos;
                 };
 
                 if (rez.blocks.size() != 0) {
-                    onRead(transformTransactions(rez.blocks), mem.last_indexed_tx );
+                    onRead<system>(transformTransactions(rez.blocks), mem.last_indexed_tx );
                     mem.last_indexed_tx += rez.blocks.size();
                     lastTxTime := rez.blocks[rez.blocks.size() - 1].timestamp.timestamp_nanos;
                 };

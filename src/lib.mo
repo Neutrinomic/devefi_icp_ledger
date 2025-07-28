@@ -102,7 +102,7 @@ module {
         var sender_instructions_cost : Nat64 = 0;
         var reader_instructions_cost : Nat64 = 0;
 
-        var callback_onReceive: ?((Transfer) -> ()) = null;
+        var callback_onReceive: ?(<system>(Transfer) -> ()) = null;
         var callback_onSent : ?((Nat64, Nat) -> ()) = null;
         // Sender 
 
@@ -218,7 +218,7 @@ module {
             onError = logErr; // In case a cycle throws an error
             onCycleEnd = func (i: Nat64) { reader_instructions_cost := i }; // returns the instructions the cycle used. 
                                                         // It can include multiple calls to onRead
-            onRead = func (transactions: [TxTypes.Transaction], start_id: Nat) {
+            onRead = func <system>(transactions: [TxTypes.Transaction], start_id: Nat) {
                 icrc_sender.confirm(transactions, start_id);
                 
                 
@@ -228,7 +228,7 @@ module {
                         case (#u_mint(mint)) {
                             let ?subaccount = BTree.get(lmem.known_accounts, Blob.compare, mint.to) else continue txloop;
                             handle_incoming_amount(?subaccount, mint.amount);
-                            ignore do ? { callback_onReceive!({
+                            ignore do ? { callback_onReceive!<system>({
                                 from = #icrc({
                                     owner = minter;
                                     subaccount = null;
@@ -254,7 +254,7 @@ module {
                                     handle_incoming_amount(?subaccount, tr.amount);
 
                                     let from_subaccount = BTree.get(lmem.known_accounts, Blob.compare, tr.from);
-                                    ignore do ? { callback_onReceive!({
+                                    ignore do ? { callback_onReceive!<system>({
                                         from = switch(from_subaccount) {
                                             case (?sa) #icrc({owner = me_can; subaccount = formatSubaccount(sa)});
                                             case (null) #icp(tr.from);
@@ -440,7 +440,7 @@ module {
         };
 
         /// Called when a received transaction is confirmed. Only one function can be set. (except dust < fee)
-        public func onReceive(fn:(Transfer) -> ()) : () {
+        public func onReceive(fn:<system>(Transfer) -> ()) : () {
             assert(Option.isNull(callback_onReceive));
             callback_onReceive := ?fn;
         };
