@@ -306,7 +306,6 @@ module {
  
 
         public func isSent(id : Nat64) : Bool {
-            if (id >= lmem.next_tx_id) return false;
             icrc_sender.isSent(id);
         };
 
