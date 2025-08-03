@@ -307,7 +307,7 @@ module {
 
         icrc_sender.setGetReaderLastUpdateTime(icp_reader.getReaderLastUpdate);
 
-        icrc_reader.optQueueSender := ?(icrc_sender.optQueueSend);
+        icp_reader.optQueueSender := ?(icrc_sender.optQueueSend);
 
         private func refreshFee() : async () {
             try {
