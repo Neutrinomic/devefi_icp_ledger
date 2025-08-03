@@ -39,6 +39,7 @@ module {
             decimals: Nat8;
             fee: Nat;
             minter: ?Account;
+            max_memo: Nat;
         };
 
         public func upgrade(from : MU.MemShell<V1.Ledger.Mem>) : MU.MemShell<Mem> {

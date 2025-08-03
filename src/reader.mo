@@ -65,6 +65,7 @@ module {
         onError : (Text) -> (); // If error occurs during following and processing it will return the error
         onCycleEnd : (Nat64) -> (); // Measure performance of following and processing transactions. Returns instruction count
         onRead : <system>([TxTypes.Transaction], Nat) -> ();
+        CYCLE_RECURRING_TIME_SEC : Nat;
     }) {
         let mem = MU.access(xmem);
 
@@ -74,6 +75,8 @@ module {
 
         var lock:Int = 0;
         let MAX_TIME_LOCKED:Int = 120_000_000_000; // 120 seconds
+
+        public var optQueueSender : ?(<system>() -> async* ()) = null;
 
         private func cycle() : async () {
         
@@ -195,7 +198,10 @@ module {
             lock := 0;
 
             // only if we reached the end we update the last update time, so that new transactions wont be sent if we are lagging behind
-            if (mem.last_indexed_tx == Nat64.toNat(rez.chain_length)) lastUpdate := Nat64.fromNat(Int.abs(Time.now()));
+            if (mem.last_indexed_tx == Nat64.toNat(rez.chain_length)) {
+                lastUpdate := Nat64.fromNat(Int.abs(Time.now()));
+                ignore do ? { await* optQueueSender!<system>(); };
+            };
         };
 
         /// Returns the last tx time or the current time if there are no more transactions to read
@@ -213,7 +219,7 @@ module {
 
    
 
-        ignore Timer.recurringTimer<system>(#seconds 2, cycle);
+        ignore Timer.recurringTimer<system>(#seconds CYCLE_RECURRING_TIME_SEC, cycle);
 
     };
 

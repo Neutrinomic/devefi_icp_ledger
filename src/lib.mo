@@ -78,6 +78,13 @@ module {
         amount : Nat;
         spender : ?AccountMixed;
     };
+
+    public type Settings = {
+        CYCLE_RECURRING_TIME_SEC : Nat;
+        START_FROM_BLOCK : { #id : Nat; #last };
+        ME_CAN : Principal;
+        LEDGER_ID: Principal;
+    };
     
     /// The ledger class
     /// start_from_block should be in most cases #last (starts from the last block when first started)
@@ -92,10 +99,11 @@ module {
     ///     stable let lmem = L.LMem();
     ///     let ledger = L.Ledger(lmem, "bnz7o-iuaaa-aaaaa-qaaaa-cai", #last);
     /// ```
-    public class Ledger<system>(xmem: MU.MemShell<VM.Mem>, ledger_id_txt: Text, start_from_block : ({#id:Nat; #last}), me_can : Principal ) {
+    public class Ledger<system>(xmem: MU.MemShell<VM.Mem>, settings: Settings) { //ledger_id_txt: Text, start_from_block : ({#id:Nat; #last}), me_can : Principal
         let lmem = MU.access(xmem);
-        let ledger_id = Principal.fromText(ledger_id_txt);
+        let ledger_id = settings.LEDGER_ID;
         let minter = Principal.fromText("rrkah-fqaaa-aaaaa-aaaaq-cai");
+        let me_can = settings.ME_CAN;
 
         let errors = SWB.SlidingWindowBuffer<Text>();
 
@@ -137,6 +145,7 @@ module {
         };
 
         let icrc_sender = IcpSender.Sender<system>({
+            CYCLE_RECURRING_TIME_SEC = settings.CYCLE_RECURRING_TIME_SEC;
             ledger_id;
             xmem = lmem.sender;
             getFee = func () : Nat { lmem.fee };
@@ -212,9 +221,10 @@ module {
 
         // Reader
         let icp_reader = IcpReader.Reader<system>({
+            CYCLE_RECURRING_TIME_SEC = settings.CYCLE_RECURRING_TIME_SEC;
             xmem = lmem.reader;
             ledger_id;
-            start_from_block;
+            start_from_block = settings.START_FROM_BLOCK;
             onError = logErr; // In case a cycle throws an error
             onCycleEnd = func (i: Nat64) { reader_instructions_cost := i }; // returns the instructions the cycle used. 
                                                         // It can include multiple calls to onRead
@@ -297,6 +307,8 @@ module {
 
         icrc_sender.setGetReaderLastUpdateTime(icp_reader.getReaderLastUpdate);
 
+        icrc_reader.optQueueSender := ?(icrc_sender.optQueueSend);
+
         private func refreshFee() : async () {
             try {
             let ledger = actor (Principal.toText(ledger_id)) : ICPLedger.Self;
@@ -375,6 +387,7 @@ module {
                 fee = lmem.fee;
                 minter = ?{ owner=minter; subaccount = null};
                 name = "Internet Computer";
+                max_memo = 32;
             }
         };
 
